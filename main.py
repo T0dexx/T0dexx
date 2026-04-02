@@ -170,7 +170,6 @@ class Car:
         self.lap = 0
         self.progress = 0.0  # fractional [0,1) within current lap
         self.total_progress = 0.0  # lap + progress
-        self.crossed_start = False  # first crossing of the start/finish line
 
     # -- polygon for drawing ------------------------------------------------
     _SHAPE = [
@@ -223,10 +222,7 @@ class Car:
 
         # Lap detection
         if old_wp > n * 0.85 and nearest < n * 0.15:
-            if self.crossed_start:
-                self.lap += 1
-            else:
-                self.crossed_start = True
+            self.lap += 1
         elif old_wp < n * 0.15 and nearest > n * 0.85:
             self.lap = max(0, self.lap - 1)
 
@@ -420,16 +416,17 @@ class Game:
         self.centerline = generate_smooth_track(CONTROL_POINTS)
         self.inner, self.outer = compute_track_edges(self.centerline, TRACK_WIDTH)
 
-        # Grid setup – F1-style grid just behind the start/finish line.
-        # Waypoint 0 is the start/finish.  Cars are placed BEHIND it
-        # (high indices) so they cross the line shortly after the start.
+        # Grid setup – F1-style grid just past the start/finish line.
+        # Waypoint 0 is the start/finish.  Cars are placed just AFTER it
+        # so the first real crossing (after a full lap) counts correctly.
+        # P1 (pole) is furthest ahead; P6 (player) is closest to the line.
         n = len(self.centerline)
         grid_spacing = 8  # waypoint gap between grid slots
 
-        # AI cars occupy the front grid rows (P1 closest to the line)
+        # AI cars occupy the front grid rows (P1 furthest ahead)
         self.ai_cars = []
         for i in range(NUM_AI):
-            idx = (n - (i + 1) * grid_spacing) % n  # P1 at n-8, P2 at n-16 …
+            idx = (NUM_AI - i) * grid_spacing  # P1 at 40, P2 at 32, …, P5 at 8
             ap = self.centerline[idx]
             nxt = self.centerline[(idx + 1) % n]
             aa = math.atan2(nxt[1] - ap[1], nxt[0] - ap[0])
@@ -441,7 +438,7 @@ class Game:
             self.ai_cars.append(ai)
 
         # Player starts at the back of the grid (last slot, P6)
-        player_idx = (n - (NUM_AI + 1) * grid_spacing) % n
+        player_idx = 1  # just past the start/finish line
         sp = self.centerline[player_idx]
         nxt = self.centerline[(player_idx + 1) % n]
         sa = math.atan2(nxt[1] - sp[1], nxt[0] - sp[0])
