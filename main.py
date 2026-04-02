@@ -8,6 +8,7 @@ Controls: Arrow keys or WASD to drive. ESC to quit. R to restart after finish.
 import pygame
 import math
 import random
+import os
 import sys
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,17 @@ TEAM_COLORS = [
     ((54, 113, 198), "Alpine"),
     ((180, 25, 28), "Alfa Romeo"),
 ]
+
+# Car sprite files (one per team, matched to TEAM_COLORS order)
+CAR_SPRITES = [
+    "Redcar.png",      # Ferrari (player)
+    "Bluecar.png",     # Mercedes
+    "Yellowcar.png",   # McLaren
+    "Greencar.png",    # Aston Martin
+    "Purplecar.png",   # Alpine
+    "Pinkcar.png",     # Alfa Romeo
+]
+SPRITE_HEIGHT = 46  # target height in pixels after scaling
 
 # Track control points – a large F1-inspired circuit
 CONTROL_POINTS = [
@@ -170,6 +182,7 @@ class Car:
         self.lap = 0
         self.progress = 0.0  # fractional [0,1) within current lap
         self.total_progress = 0.0  # lap + progress
+        self.sprite = None  # set externally when PNG sprites are available
 
     # -- polygon for drawing ------------------------------------------------
     _SHAPE = [
@@ -230,17 +243,24 @@ class Car:
 
     # -- drawing ------------------------------------------------------------
     def draw(self, surface, camera):
-        pts = [camera.w2s(px, py) for px, py in self.polygon()]
-        if not any(-60 < sx < SCREEN_WIDTH + 60 and -60 < sy < SCREEN_HEIGHT + 60
-                   for sx, sy in pts):
-            return
-        pygame.draw.polygon(surface, self.color, pts)
-        pygame.draw.polygon(surface, BLACK, pts, 2)
-        # Cockpit dot
-        cos_a = math.cos(self.angle)
-        sin_a = math.sin(self.angle)
-        cx, cy = camera.w2s(self.x + 3 * cos_a, self.y + 3 * sin_a)
-        pygame.draw.circle(surface, DARK_GRAY, (cx, cy), 3)
+        if self.sprite:
+            # Sprite faces UP; game angle 0 = RIGHT → rotate by -90 - degrees
+            rot_angle = -90 - math.degrees(self.angle)
+            rotated = pygame.transform.rotate(self.sprite, rot_angle)
+            rect = rotated.get_rect(center=camera.w2s(self.x, self.y))
+            if -100 < rect.centerx < SCREEN_WIDTH + 100 and -100 < rect.centery < SCREEN_HEIGHT + 100:
+                surface.blit(rotated, rect)
+        else:
+            pts = [camera.w2s(px, py) for px, py in self.polygon()]
+            if not any(-60 < sx < SCREEN_WIDTH + 60 and -60 < sy < SCREEN_HEIGHT + 60
+                       for sx, sy in pts):
+                return
+            pygame.draw.polygon(surface, self.color, pts)
+            pygame.draw.polygon(surface, BLACK, pts, 2)
+            cos_a = math.cos(self.angle)
+            sin_a = math.sin(self.angle)
+            cx, cy = camera.w2s(self.x + 3 * cos_a, self.y + 3 * sin_a)
+            pygame.draw.circle(surface, DARK_GRAY, (cx, cy), 3)
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +442,7 @@ class Game:
         # P1 (pole) is furthest ahead; P6 (player) is closest to the line.
         n = len(self.centerline)
         grid_spacing = 8  # waypoint gap between grid slots
+        self.pole_idx = NUM_AI * grid_spacing  # P1 position (for start line)
 
         # AI cars occupy the front grid rows (P1 furthest ahead)
         self.ai_cars = []
@@ -464,6 +485,27 @@ class Game:
         self._track_offset = (0.0, 0.0)
         self._prerender_track()
 
+        # Load and assign car sprites
+        self._load_sprites()
+
+    def _load_sprites(self):
+        """Load PNG car sprites and assign them to cars."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        for i, filename in enumerate(CAR_SPRITES):
+            path = os.path.join(script_dir, filename)
+            if not os.path.exists(path):
+                continue
+            img = pygame.image.load(path).convert_alpha()
+            # Scale to target height, preserving aspect ratio
+            orig_w, orig_h = img.get_size()
+            scale = SPRITE_HEIGHT / orig_h
+            new_w = int(orig_w * scale)
+            img = pygame.transform.smoothscale(img, (new_w, SPRITE_HEIGHT))
+            if i == 0:
+                self.player.sprite = img
+            elif i - 1 < len(self.ai_cars):
+                self.ai_cars[i - 1].sprite = img
+
     # -- pre-render ---------------------------------------------------------
     def _prerender_track(self):
         all_pts = self.inner + self.outer
@@ -505,13 +547,14 @@ class Game:
         for i in range(0, len(center_s) - 4, 8):
             pygame.draw.line(surf, (90, 90, 95), center_s[i], center_s[i + 3], 1)
 
-        # Start / finish line
+        # Start / finish line at P1 (pole) position
+        pi = min(self.pole_idx, len(outer_s) - 1, len(inner_s) - 1)
         if outer_s and inner_s:
-            pygame.draw.line(surf, WHITE, outer_s[0], inner_s[0], 5)
+            pygame.draw.line(surf, WHITE, outer_s[pi], inner_s[pi], 5)
             # Chequered pattern near start
             for k in range(0, 10, 2):
-                sx = outer_s[0][0] + (inner_s[0][0] - outer_s[0][0]) * k / 10
-                sy = outer_s[0][1] + (inner_s[0][1] - outer_s[0][1]) * k / 10
+                sx = outer_s[pi][0] + (inner_s[pi][0] - outer_s[pi][0]) * k / 10
+                sy = outer_s[pi][1] + (inner_s[pi][1] - outer_s[pi][1]) * k / 10
                 pygame.draw.rect(surf, WHITE, (int(sx) - 3, int(sy) - 3, 6, 6))
 
         self._track_surf = surf
