@@ -298,7 +298,7 @@ class AICar(Car):
         self.look_ahead = random.randint(8, 18)
         self.race_ticks = 0  # frames since race start (for rubber-band grace)
 
-    def update(self, player_progress):
+    def update(self, player_progress, all_ai=None):
         n = len(self.track_points)
         target_idx = (self.current_wp + self.look_ahead) % n
         target = self.track_points[target_idx]
@@ -312,6 +312,34 @@ class AICar(Car):
             diff += 2 * math.pi
 
         steer = max(-self.steer_rate, min(self.steer_rate, diff * 0.1 * self.skill))
+
+        # --- AI-to-AI avoidance ---
+        # Nudge steering away from nearby AI cars to prevent pile-ups.
+        if all_ai:
+            avoid_radius = 60
+            for other in all_ai:
+                if other is self:
+                    continue
+                dx = other.x - self.x
+                dy = other.y - self.y
+                d = math.hypot(dx, dy)
+                if 0 < d < avoid_radius:
+                    # Angle from self to other car
+                    to_other = math.atan2(dy, dx)
+                    rel = to_other - self.angle
+                    while rel > math.pi:
+                        rel -= 2 * math.pi
+                    while rel < -math.pi:
+                        rel += 2 * math.pi
+                    # Only avoid cars roughly ahead (within ±90°)
+                    if abs(rel) < math.pi * 0.5:
+                        strength = (avoid_radius - d) / avoid_radius * 0.04
+                        # Steer away: if other is to the left (rel<0) steer right
+                        if rel >= 0:
+                            steer -= strength
+                        else:
+                            steer += strength
+
         self.angle += steer + random.uniform(-self.wobble, self.wobble)
 
         # --- Rubberbanding ---
@@ -388,14 +416,16 @@ class Game:
         self.centerline = generate_smooth_track(CONTROL_POINTS)
         self.inner, self.outer = compute_track_edges(self.centerline, TRACK_WIDTH)
 
-        # Grid setup – AI cars line up at the front, player starts last.
+        # Grid setup – F1-style grid just behind the start/finish line.
+        # Waypoint 0 is the start/finish.  Cars are placed BEHIND it
+        # (high indices) so they cross the line shortly after the start.
         n = len(self.centerline)
-        grid_spacing = 10  # waypoint gap between grid slots
+        grid_spacing = 8  # waypoint gap between grid slots
 
-        # AI cars occupy the front grid rows
+        # AI cars occupy the front grid rows (P1 closest to the line)
         self.ai_cars = []
         for i in range(NUM_AI):
-            idx = i * grid_spacing  # P1 at index 0, P2 at 10, …
+            idx = (n - (i + 1) * grid_spacing) % n  # P1 at n-8, P2 at n-16 …
             ap = self.centerline[idx]
             nxt = self.centerline[(idx + 1) % n]
             aa = math.atan2(nxt[1] - ap[1], nxt[0] - ap[0])
@@ -404,8 +434,8 @@ class Game:
             ai.current_wp = idx
             self.ai_cars.append(ai)
 
-        # Player starts at the back of the grid (last slot)
-        player_idx = NUM_AI * grid_spacing
+        # Player starts at the back of the grid (last slot, P6)
+        player_idx = (n - (NUM_AI + 1) * grid_spacing) % n
         sp = self.centerline[player_idx]
         nxt = self.centerline[(player_idx + 1) % n]
         sa = math.atan2(nxt[1] - sp[1], nxt[0] - sp[0])
@@ -499,7 +529,7 @@ class Game:
 
         # AI
         for ai in self.ai_cars:
-            ai.update(self.player.total_progress)
+            ai.update(self.player.total_progress, self.ai_cars)
             ai.check_on_track(self.centerline, TRACK_WIDTH)
             ai.update_progress(self.centerline)
 
