@@ -170,6 +170,7 @@ class Car:
         self.lap = 0
         self.progress = 0.0  # fractional [0,1) within current lap
         self.total_progress = 0.0  # lap + progress
+        self.crossed_start = False  # first crossing of the start/finish line
 
     # -- polygon for drawing ------------------------------------------------
     _SHAPE = [
@@ -222,7 +223,10 @@ class Car:
 
         # Lap detection
         if old_wp > n * 0.85 and nearest < n * 0.15:
-            self.lap += 1
+            if self.crossed_start:
+                self.lap += 1
+            else:
+                self.crossed_start = True
         elif old_wp < n * 0.15 and nearest > n * 0.85:
             self.lap = max(0, self.lap - 1)
 
