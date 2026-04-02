@@ -296,6 +296,7 @@ class AICar(Car):
         self.skill = random.uniform(0.75, 1.0)
         self.wobble = random.uniform(0.0, 0.008)
         self.look_ahead = random.randint(8, 18)
+        self.race_ticks = 0  # frames since race start (for rubber-band grace)
 
     def update(self, player_progress):
         n = len(self.track_points)
@@ -314,14 +315,18 @@ class AICar(Car):
         self.angle += steer + random.uniform(-self.wobble, self.wobble)
 
         # --- Rubberbanding ---
+        # Grace period: no rubber-banding for the first ~15 seconds so
+        # the start is a fair race and the player must genuinely overtake.
+        self.race_ticks += 1
+        grace_period = 900  # 15 s at 60 fps
+        rubber_strength = max(0.0, min(1.0, (self.race_ticks - grace_period) / 300))
+
         gap = player_progress - self.total_progress
         if gap > 0.3:
-            # Player ahead → AI gets a boost
-            boost = min(2.5, gap * 2.0)
+            boost = min(2.5, gap * 2.0) * rubber_strength
             self.max_speed = self.base_max_speed + boost
         elif gap < -0.3:
-            # AI ahead → slow down a bit
-            penalty = min(1.5, abs(gap) * 0.9)
+            penalty = min(1.5, abs(gap) * 0.9) * rubber_strength
             self.max_speed = self.base_max_speed - penalty
         else:
             self.max_speed = self.base_max_speed
@@ -383,21 +388,14 @@ class Game:
         self.centerline = generate_smooth_track(CONTROL_POINTS)
         self.inner, self.outer = compute_track_edges(self.centerline, TRACK_WIDTH)
 
-        # Start position / angle
-        sp = self.centerline[0]
-        sa = math.atan2(
-            self.centerline[1][1] - sp[1],
-            self.centerline[1][0] - sp[0],
-        )
-
-        # Player
-        self.player = PlayerCar(sp[0], sp[1], sa, TEAM_COLORS[0][0])
-
-        # AI cars (staggered behind the player on the grid)
-        self.ai_cars = []
+        # Grid setup – AI cars line up at the front, player starts last.
         n = len(self.centerline)
+        grid_spacing = 10  # waypoint gap between grid slots
+
+        # AI cars occupy the front grid rows
+        self.ai_cars = []
         for i in range(NUM_AI):
-            idx = (n - (i + 1) * 10) % n
+            idx = i * grid_spacing  # P1 at index 0, P2 at 10, …
             ap = self.centerline[idx]
             nxt = self.centerline[(idx + 1) % n]
             aa = math.atan2(nxt[1] - ap[1], nxt[0] - ap[0])
@@ -405,6 +403,14 @@ class Game:
             ai = AICar(ap[0], ap[1], aa, color, name, self.centerline)
             ai.current_wp = idx
             self.ai_cars.append(ai)
+
+        # Player starts at the back of the grid (last slot)
+        player_idx = NUM_AI * grid_spacing
+        sp = self.centerline[player_idx]
+        nxt = self.centerline[(player_idx + 1) % n]
+        sa = math.atan2(nxt[1] - sp[1], nxt[0] - sp[0])
+        self.player = PlayerCar(sp[0], sp[1], sa, TEAM_COLORS[0][0])
+        self.player.current_wp = player_idx
 
         self.camera = Camera(sp[0], sp[1])
 
