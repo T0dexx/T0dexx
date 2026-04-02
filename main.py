@@ -436,6 +436,8 @@ class Game:
             color, name = TEAM_COLORS[(i + 1) % len(TEAM_COLORS)]
             ai = AICar(ap[0], ap[1], aa, color, name, self.centerline)
             ai.current_wp = idx
+            ai.progress = idx / n
+            ai.total_progress = ai.progress
             self.ai_cars.append(ai)
 
         # Player starts at the back of the grid (last slot, P6)
@@ -445,6 +447,8 @@ class Game:
         sa = math.atan2(nxt[1] - sp[1], nxt[0] - sp[0])
         self.player = PlayerCar(sp[0], sp[1], sa, TEAM_COLORS[0][0])
         self.player.current_wp = player_idx
+        self.player.progress = player_idx / n
+        self.player.total_progress = self.player.progress
 
         self.camera = Camera(sp[0], sp[1])
 
@@ -452,7 +456,11 @@ class Game:
         self.state = "countdown"  # countdown | racing | finished
         self.countdown = 180  # 3 s
         self.race_time = 0
-        self.positions = []
+
+        # Initial standings based on grid positions
+        all_cars = [self.player] + self.ai_cars
+        all_cars.sort(key=lambda c: c.total_progress, reverse=True)
+        self.positions = all_cars
 
         # Pre-render track
         self._track_surf = None
